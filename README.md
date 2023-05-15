@@ -1,54 +1,57 @@
-# HiVT: Hierarchical Vector Transformer for Multi-Agent Motion Prediction
-This repository contains the official implementation of [HiVT: Hierarchical Vector Transformer for Multi-Agent Motion Prediction](https://openaccess.thecvf.com/content/CVPR2022/papers/Zhou_HiVT_Hierarchical_Vector_Transformer_for_Multi-Agent_Motion_Prediction_CVPR_2022_paper.pdf) published in CVPR 2022.
+HiVT
+---
 
-![](assets/overview.png)
+## Setup
 
-## Gettting Started
+### Dataset
 
-1\. Clone this repository:
-```
-git clone https://github.com/ZikangZhou/HiVT.git
-cd HiVT
-```
+1. Download [Argoverse Motion Forecasting Dataset v1.1](https://www.argoverse.org/av1.html). After downloading and extracting the tar.gz files, the dataset directory should be organized as follows:
+  ```
+  /path/to/dataset_root/
+  ├── train/
+  |   └── data/
+  |       ├── 1.csv
+  |       ├── 2.csv
+  |       ├── ...
+  └── val/
+      └── data/
+          ├── 1.csv
+          ├── 2.csv
+          ├── ...
+  ```
 
-2\. Create a conda environment and install the dependencies:
-```
-conda create -n HiVT python=3.8
-conda activate HiVT
-conda install pytorch==1.8.0 cudatoolkit=11.1 -c pytorch -c conda-forge
-conda install pytorch-geometric==1.7.2 -c rusty1s -c conda-forge
-conda install pytorch-lightning==1.5.2 -c conda-forge
-```
+2. Setup Docker
+  ```
+  docker build -t zhangkin/hivt .
+  # or directly from dockerhub
+  docker pull zhangkin/hivt
+  ```
 
-3\. Download [Argoverse Motion Forecasting Dataset v1.1](https://www.argoverse.org/av1.html). After downloading and extracting the tar.gz files, the dataset directory should be organized as follows:
-```
-/path/to/dataset_root/
-├── train/
-|   └── data/
-|       ├── 1.csv
-|       ├── 2.csv
-|       ├── ...
-└── val/
-    └── data/
-        ├── 1.csv
-        ├── 2.csv
-        ├── ...
-```
-
-4\. Install [Argoverse 1 API](https://github.com/argoai/argoverse-api).
+3. Run Container
+  ```
+  docker run --gpus all -it -v /home/kin/DATA_HDD/yy:/root/data -p 6006:6006 zhangkin/hivt:full /bin/zsh
+  ```
 
 ## Training
 
+### From Scarth
 To train HiVT-64:
 ```
-python train.py --root /path/to/dataset_root/ --embed_dim 64
+python train.py --root /root/data --embed_dim 64
 ```
 
 To train HiVT-128:
 ```
-python train.py --root /path/to/dataset_root/ --embed_dim 128
+python train.py --root /root/data --embed_dim 128
 ```
 
+### Continuing checkpoint
+
+```
+python train.py --root /root/data --embed_dim 128 --ckpt_path /root/HiVT/checkpoints/HiVT-128/checkpoints/epoch=63-step=411903.ckpt
+```
+
+### Monitor
 **Note**: When running the training script for the first time, it will take several hours to preprocess the data (~3.5 hours on my machine). Training on an RTX 2080 Ti GPU takes 35-40 minutes per epoch.
 
 During training, the checkpoints will be saved in `lightning_logs/` automatically. To monitor the training process:
