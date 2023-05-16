@@ -20,7 +20,7 @@ RUN apt update && apt install -y libgl1 libglib2.0-0
 RUN git clone https://github.com/argoverse/argoverse-api.git && \
     cd argoverse-api && pip install . && \
     pip install numpy==1.20.3 && \
-    pip uninstall torch_geometric && pip install torch_geometric
+    pip uninstall torch_geometric && pip install torch_geometric==1.7.2
 
 # need this data in packages to read
 RUN cd /usr/local/lib/python3.8/dist-packages && wget https://s3.amazonaws.com/argoverse/datasets/av1.1/tars/hd_maps.tar.gz && tar -xvf hd_maps.tar.gz
