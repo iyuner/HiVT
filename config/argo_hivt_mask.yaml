@@ -1,0 +1,19 @@
+# pretrain, future_prediction
+stage: future_prediction
+reformat: False
+
+# paras for pretrain
+mask_strategy: pointwise
+mask_ratio: 0.75
+
+# train or eval or submit or analysis 
+task: train
+resume: False
+
+# load checkpoint
+ckpt_path: None
+load_opz_epoch: False
+frozen_encoder: False
+
+# wandb modes, online, offline, disabled
+wandb_mode: online

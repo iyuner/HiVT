@@ -25,11 +25,15 @@ from models import GlobalInteractor
 from models import LocalEncoder
 from models import MLPDecoder
 from utils import TemporalData
-
+from util.utils_mask_helper import get_random_masked
+from util.vis_helper import visualize_joint_mask
+import wandb
 
 class HiVT(pl.LightningModule):
 
     def __init__(self,
+                 trainer,
+                 config,
                  historical_steps: int,
                  future_steps: int,
                  num_modes: int,
@@ -46,8 +50,11 @@ class HiVT(pl.LightningModule):
                  lr: float,
                  weight_decay: float,
                  T_max: int,
-                 **kwargs) -> None:
+                 **kwargs,
+                 ) -> None:
         super(HiVT, self).__init__()
+        self.trainer = trainer
+        self.config = config
         self.save_hyperparameters()
         self.historical_steps = historical_steps
         self.future_steps = future_steps
@@ -57,8 +64,15 @@ class HiVT(pl.LightningModule):
         self.lr = lr
         self.weight_decay = weight_decay
         self.T_max = T_max
+        
+        if self.config.stage == "pretrain" or self.config.stage == "conditional_prediction":# or self.reformat:
+            input_steps = historical_steps + future_steps
+            output_steps = historical_steps + future_steps
+        else:
+            input_steps = historical_steps
+            output_steps = future_steps
 
-        self.local_encoder = LocalEncoder(historical_steps=historical_steps,
+        self.local_encoder = LocalEncoder(historical_steps=input_steps,
                                           node_dim=node_dim,
                                           edge_dim=edge_dim,
                                           embed_dim=embed_dim,
@@ -67,7 +81,7 @@ class HiVT(pl.LightningModule):
                                           num_temporal_layers=num_temporal_layers,
                                           local_radius=local_radius,
                                           parallel=parallel)
-        self.global_interactor = GlobalInteractor(historical_steps=historical_steps,
+        self.global_interactor = GlobalInteractor(historical_steps=input_steps,
                                                   embed_dim=embed_dim,
                                                   edge_dim=edge_dim,
                                                   num_modes=num_modes,
@@ -77,7 +91,7 @@ class HiVT(pl.LightningModule):
                                                   rotate=rotate)
         self.decoder = MLPDecoder(local_channels=embed_dim,
                                   global_channels=embed_dim,
-                                  future_steps=future_steps,
+                                  future_steps=output_steps,
                                   num_modes=num_modes,
                                   uncertain=True)
         self.reg_loss = LaplaceNLLLoss(reduction='mean')
@@ -102,14 +116,25 @@ class HiVT(pl.LightningModule):
         else:
             data['rotate_mat'] = None
 
+        reg_mask = None
+        
+        if self.config.stage == "pretrain":
+            # change x, y, and bos_mask
+            reg_mask = ~data['padding_mask'].clone()
+            data, addition_padding_mask = get_random_masked(data, self.config)
+            reg_mask = torch.logical_and(reg_mask, addition_padding_mask)
+        else:
+            reg_mask = ~data['padding_mask'][:, self.historical_steps:]
+
         local_embed = self.local_encoder(data=data)
         global_embed = self.global_interactor(data=data, local_embed=local_embed)
         y_hat, pi = self.decoder(local_embed=local_embed, global_embed=global_embed)
-        return y_hat, pi
+        return y_hat, pi, reg_mask
 
     def training_step(self, data, batch_idx):
-        y_hat, pi = self(data)
-        reg_mask = ~data['padding_mask'][:, self.historical_steps:]
+        y_hat, pi, reg_mask = self(data)
+        # reg_mask = ~data['padding_mask'][:, self.historical_steps:]
+
         valid_steps = reg_mask.sum(dim=-1)
         cls_mask = valid_steps > 0
         l2_norm = (torch.norm(y_hat[:, :, :, : 2] - data.y, p=2, dim=-1) * reg_mask).sum(dim=-1)  # [F, N]
@@ -123,8 +148,13 @@ class HiVT(pl.LightningModule):
         return loss
 
     def validation_step(self, data, batch_idx):
-        y_hat, pi = self(data)
-        reg_mask = ~data['padding_mask'][:, self.historical_steps:]
+        if self.trainer.global_step == 0: 
+            wandb.define_metric('metrics/Val minADE_6', summary='min')
+        
+        y_hat, pi, reg_mask = self(data)
+
+        # figure = visualize_joint_mask(data, y_hat)
+        # self.log('figure', wandb.Image(figure), on_step=False, on_epoch=True,)
         l2_norm = (torch.norm(y_hat[:, :, :, : 2] - data.y, p=2, dim=-1) * reg_mask).sum(dim=-1)  # [F, N]
         best_mode = l2_norm.argmin(dim=0)
         y_hat_best = y_hat[best_mode, torch.arange(data.num_nodes)]
@@ -139,9 +169,9 @@ class HiVT(pl.LightningModule):
         self.minADE.update(y_hat_best_agent, y_agent)
         self.minFDE.update(y_hat_best_agent, y_agent)
         self.minMR.update(y_hat_best_agent, y_agent)
-        self.log('val_minADE', self.minADE, prog_bar=True, on_step=False, on_epoch=True, batch_size=y_agent.size(0))
-        self.log('val_minFDE', self.minFDE, prog_bar=True, on_step=False, on_epoch=True, batch_size=y_agent.size(0))
-        self.log('val_minMR', self.minMR, prog_bar=True, on_step=False, on_epoch=True, batch_size=y_agent.size(0))
+        self.log('metrics/Val minADE_6', self.minADE, prog_bar=True, on_step=False, on_epoch=True, batch_size=y_agent.size(0))
+        self.log('metrics/Val minFDE_6', self.minFDE, prog_bar=True, on_step=False, on_epoch=True, batch_size=y_agent.size(0))
+        self.log('metrics/Val minMR', self.minMR, prog_bar=True, on_step=False, on_epoch=True, batch_size=y_agent.size(0))
 
     def configure_optimizers(self):
         decay = set()

@@ -15,9 +15,13 @@ from argparse import ArgumentParser
 
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint
+from pytorch_lightning.loggers import WandbLogger
+
 
 from datamodules import ArgoverseV1DataModule
 from models.hivt import HiVT
+import yaml
+from easydict import EasyDict
 
 if __name__ == '__main__':
     pl.seed_everything(2022)
@@ -32,13 +36,26 @@ if __name__ == '__main__':
     parser.add_argument('--persistent_workers', type=bool, default=True)
     parser.add_argument('--gpus', type=int, default=1)
     parser.add_argument('--max_epochs', type=int, default=64)
-    parser.add_argument('--monitor', type=str, default='val_minFDE', choices=['val_minADE', 'val_minFDE', 'val_minMR'])
+    parser.add_argument('--monitor', type=str, default='metrics/Val minADE_6', choices=['metrics/Val minADE_6', 'metrics/Val minFDE_6', 'val_minMR'])
     parser.add_argument('--save_top_k', type=int, default=5)
+    parser.add_argument('--config_file', default='', required=True)
+    parser.add_argument("--slurm", type=str, default="", help="Experiment identifier")
     parser = HiVT.add_model_specific_args(parser)
     args = parser.parse_args()
 
+    # Load the configuration file
+    with open(args.config_file, 'r') as f:
+        config = yaml.safe_load(f)
+    # add args parameter into config
+    for k, v in vars(args).items():
+       config[k] = v
+    config["exp_name"] = args.config_file.split("/")[-1].split(".")[0]
+    config = EasyDict(config)
+
+    wandb_logger = WandbLogger(project="MAE", entity="iyuner", name=(config.slurm+"_"+config.exp_name), config=config, mode=config.wandb_mode)
+
     model_checkpoint = ModelCheckpoint(monitor=args.monitor, save_top_k=args.save_top_k, mode='min')
-    trainer = pl.Trainer.from_argparse_args(args, callbacks=[model_checkpoint])
-    model = HiVT(**vars(args))
+    trainer = pl.Trainer.from_argparse_args(args, callbacks=[model_checkpoint], logger=wandb_logger)#, gpus = 2, strategy="ddp")
+    model = HiVT(trainer, config, **vars(args))
     datamodule = ArgoverseV1DataModule.from_argparse_args(args)
     trainer.fit(model, datamodule)
